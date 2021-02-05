@@ -30,7 +30,12 @@ def return_ents(ident, proc_text):
 
 
 def extract_entities(xmlfile, labels=['PERSON', 'ORG', 'NORP', 'WORK OF ART']):
-    nlp = stanza.Pipeline('en')
+    try:
+        nlp = stanza.Pipeline('en')
+    except ValueError:
+        print('English model has not been downloaded. Downloading now.')
+        stanza.download('en')
+        nlp = stanza.Pipeline('en')
     ents = {}
     for ident, lines in record_iterator(xmlfile):
         for line in lines:
