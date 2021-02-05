@@ -2,46 +2,38 @@ import json
 import csv
 import argparse
 from pprint import pprint
-import warnings
-from lxml import etree
-warnings.filterwarnings("ignore", category=RuntimeWarning)
-import en_core_web_sm
+import stanza
+from record_iterator import record_iterator
 
 
 def return_ents(ident, proc_text):
     ents = {}
-    for entity in proc_text.ents:
-        if entity.start < 3:
+    for entity in proc_text.entities:
+        if entity.start_char < 10:
             cstart = 0
         else:
-            cstart = entity.start - 3
-        if entity.end > len(proc_text) + 3:
-            cend = len(proc_text)
+            cstart = entity.start_char - 10
+        if entity.end_char > len(proc_text.text) + 10:
+            cend = len(proc_text.text)
         else:
-            cend = entity.end + 3
-        context = proc_text[cstart:cend]
+            cend = entity.end_char + 10
+        context = proc_text.text[cstart:cend]
         if entity.text not in ents.keys():
             ents[entity.text] = [
-                    {'text': entity.text, 'record': ident, 'label': entity.label_,
-                        'context': context.text}]
+                    {'text': entity.text, 'record': ident, 'label': entity.type,
+                        'context': context}]
         else:
             ents[entity.text].append(
-                {'text': entity.text, 'record': ident, 'label': entity.label_,
-                    'context': context.text})
+                {'text': entity.text, 'record': ident, 'label': entity.type,
+                    'context': context})
     return(ents)
 
 
 def extract_entities(xmlfile, labels=['PERSON', 'ORG', 'NORP', 'WORK OF ART']):
-    nlp = en_core_web_sm.load()
+    nlp = stanza.Pipeline('en')
     ents = {}
-    et = etree.parse(xmlfile)
-    root = et.getroot()
-    for record in root:
-        title = record.findtext('atom[@name="EADUnitTitle"]')
-        scope = record.findtext('atom[@name="EADScopeAndContent"]')
-        ident = record.findtext('atom[@name="EADUnitID"]')
-        text = str(title) + '\n' + str(scope)
-        for line in text.splitlines():
+    for ident, lines in record_iterator(xmlfile):
+        for line in lines:
             proc_line = nlp(line)
             line_ents = return_ents(ident, proc_line)
             for ent, instances in line_ents.items():

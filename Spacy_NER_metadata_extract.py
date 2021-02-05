@@ -1,14 +1,11 @@
-import os
 import json
 import csv
 import argparse
 from pprint import pprint
-from fuzzywuzzy import process
-import re
 import warnings
-from lxml import etree
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 import en_core_web_sm
+from record_iterator import record_iterator
 
 
 def return_ents(ident, proc_text):
@@ -34,31 +31,11 @@ def return_ents(ident, proc_text):
     return(ents)
 
 
-def fuzz_entities(ents, score=80):
-    fuzzed_ents = {}
-    ent_look = list(ents.keys())
-    for ent, instances in ents.items():
-        choices = process.extractBests(ent, ent_look, score_cutoff=score)
-        for choice, score in choices:
-            ent_look.remove(choice)
-            if ent not in fuzzed_ents.keys():
-                fuzzed_ents.update({ent: ents[choice]})
-            else:
-                fuzzed_ents[ent].append(ents[choice])
-    return(fuzzed_ents)
-
-
 def extract_entities(xmlfile, labels=['PERSON', 'ORG', 'NORP', 'WORK OF ART']):
     nlp = en_core_web_sm.load()
     ents = {}
-    et = etree.parse(xmlfile)
-    root = et.getroot()
-    for record in root:
-        title = record.findtext('atom[@name="EADUnitTitle"]')
-        scope = record.findtext('atom[@name="EADScopeAndContent"]')
-        ident = record.findtext('atom[@name="EADUnitID"]')
-        text = str(title) + '\n' + str(scope)
-        for line in text.splitlines():
+    for ident, lines in record_iterator(xmlfile):
+        for line in lines:
             proc_line = nlp(line)
             line_ents = return_ents(ident, proc_line)
             for ent, instances in line_ents.items():
@@ -96,9 +73,6 @@ if __name__ == '__main__':
         'xmlfile', metavar='i', type=str,
         help='the base directory with your files')
     argparser.add_argument(
-        '--fuzz', action='store_true',
-        help='fuzzy match entities')
-    argparser.add_argument(
         '--ents', type=str, nargs='+',
         default=['PERSON', 'ORG', 'NORP', 'WORK OF ART'],
         help='the base directory with your files')
@@ -111,8 +85,6 @@ if __name__ == '__main__':
 
     args = argparser.parse_args()
     ents = extract_entities(args.xmlfile, args.ents)
-    if args.fuzz:
-        ents = fuzz_entities(ents)
     if args.dump is not None:
         with open(args.dump, 'w') as f:
             json.dump(ents, f, indent=1)
