@@ -1,5 +1,4 @@
-# A bunch of code and experiments for extracting entities from
-# University of Melbourne Archives textual metadata
+# A bunch of code and experiments for extracting entities from University of Melbourne Archives textual metadata
 
 ## Requirements
 Python 3 (tested using 3.9, earlier versions may not work).
@@ -15,4 +14,4 @@ fields. Use this as in put for the extract_entities.py script.
 Additional arguments. You can dump the resulting JSON to a file using the `--json`
 parameter, or csv using `--csv <new csv file>`. To restrict or expand the
 entities extracted, use the `--ents` parameter. for Example, to only extract names
-of people and organisations, use `--ents PERSON ORG`
+of people and organisations, use `--ents PERSON ORG`.

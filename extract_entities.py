@@ -4,6 +4,7 @@ import argparse
 from pprint import pprint
 from lxml import etree
 from concurrent.futures import ProcessPoolExecutor
+from fuzzywuzzy import process, fuzz
 
 LABELS = ['PERSON', 'ORG', 'GPE', 'LOC', 'FAC', 'EVENT', 'LANGUAGE']
 
@@ -156,6 +157,26 @@ def spacy_extract_entities(datafile, labels=LABELS):
     return(ents)
 
 
+def cluster_entities(entities):
+    sorted_entities = sorted(
+        entities.items(),
+        key=lambda row: len(row[1]['occurrences']), reverse=True)
+    for ent, _ in sorted_entities:
+        if ent in entities.keys():
+            data = entities.pop(ent)
+            data['alternate'] = []
+            r = process.extractOne(
+                ent, entities.keys(), score_cutoff=90,
+                scorer=fuzz.token_sort_ratio)
+            if r is not None:
+                print(f'reconciled {ent} with {r[0]}')
+                fuzz_data = entities.pop(r[0])
+                data['occurrences'].extend(fuzz_data['occurrences'])
+                data['alternate'].append(r[0])
+            entities[ent] = data
+    return entities
+
+
 def write_csv(csvfile, data):
     """writes a csv file of entities, sorted by the frequency from highest to
     lowest"""
@@ -172,10 +193,12 @@ def write_csv(csvfile, data):
             'label': data['label'],
             'records': '|'.join(records),
             'context': '|'.join(context)}
+        if data.get('alternate') is not None:
+            row['alternate'] = '|'.join(data.get('alternate'))
         rows.append(row)
         rows = sorted(rows, key=lambda row: row['occurrences'], reverse=True)
         with open(csvfile, 'w', encoding='utf-8-sig', newline='') as f:
-            fieldnames = ['label', 'text', 'records', 'context', 'occurrences']
+            fieldnames = ['label', 'text', 'alternate', 'records', 'context', 'occurrences']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
@@ -193,9 +216,12 @@ if __name__ == '__main__':
     argparser.add_argument(
         '--ents', type=str, nargs='+',
         default=LABELS,
-        help='the base directory with your files')
+        help='Entity types to extract')
     argparser.add_argument(
         '--dump', type=str,
+        help='dump JSON output to file')
+    argparser.add_argument(
+        '--cluster', action='store_true',
         help='dump JSON output to file')
     argparser.add_argument(
         '--csv', type=str,
@@ -206,6 +232,8 @@ if __name__ == '__main__':
         ents = stanza_extract_entities(args.xmlfile, args.ents)
     elif args.processor == 'spacy':
         ents = spacy_extract_entities(args.xmlfile, args.ents)
+    if args.cluster:
+        ents = cluster_entities(ents)
     if args.dump is not None:
         with open(args.dump, 'w') as f:
             json.dump(ents, f, indent=1)

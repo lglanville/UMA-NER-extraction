@@ -34,13 +34,14 @@ def reconcile_parties(csvfile):
                 r = geolocator.geocode(row['text'])
                 if r is not None:
                     row['address'] = r.address
-                    row['latitude'] = r.latitide
+                    row['latitude'] = r.latitude
                     row['longitude'] = r.longitude
+                    print(f'Matched {row["text"]} with {r.address}')
             rows.append(row)
     fieldnames.extend([
         'EMU name', 'EMU IRN', 'match score',
         'address', 'latitude', 'longitude'])
-    with open(csvfile, encoding='utf-8-sig') as f:
+    with open(csvfile, 'w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
