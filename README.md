@@ -13,5 +13,5 @@ fields. Use this as in put for the extract_entities.py script.
 `python extract_entities.py <EMu data file>`
 Additional arguments. You can dump the resulting JSON to a file using the `--json`
 parameter, or csv using `--csv <new csv file>`. To restrict or expand the
-entities extracted, use the `--ents` parameter. for Example, to only extract names
+entities extracted, use the `--ents` parameter. For example, to only extract names
 of people and organisations, use `--ents PERSON ORG`.

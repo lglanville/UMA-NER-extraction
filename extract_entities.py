@@ -2,8 +2,9 @@ import json
 import csv
 import argparse
 from pprint import pprint
-from lxml import etree
 from concurrent.futures import ProcessPoolExecutor
+from threading import Lock
+from lxml import etree
 from fuzzywuzzy import process, fuzz
 
 LABELS = ['PERSON', 'ORG', 'GPE', 'LOC', 'FAC', 'EVENT', 'LANGUAGE']
@@ -13,17 +14,34 @@ def xml_iterator(xmlfile):
     """iterate through an EMu XML export, return an identifier and lines of
     descriptive text from title and scope and content"""
     for event, record in etree.iterparse(xmlfile, tag='tuple'):
-        title = record.findtext('atom[@name="EADUnitTitle"]')
-        scope = record.findtext('atom[@name="EADScopeAndContent"]')
-        ident = record.findtext('atom[@name="EADUnitID"]')
-        if ident is not None and record.attrib == {}:
-            lines = []
-            if title is not None:
-                lines.append(title)
-            if scope is not None:
-                lines.extend(scope.splitlines())
-            record.clear()
-            yield ident, lines
+        if record.find('atom[@name="EADUnitTitle"]') is not None:
+            title = record.findtext('atom[@name="EADUnitTitle"]')
+            scope = record.findtext('atom[@name="EADScopeAndContent"]')
+            ident = record.findtext('atom[@name="EADUnitID"]')
+            if ident is not None and record.attrib == {}:
+                lines = []
+                if title is not None:
+                    lines.append(title)
+                if scope is not None:
+                    lines.extend(scope.splitlines())
+                record.clear()
+                yield ident, lines
+        elif record.find('atom[@name="NamFullName"]') is not None:
+            name = record.findtext('atom[@name="NamFullName"]')
+            biog = record.findtext('atom[@name="BioCommencementNotes"]')
+            his_begin = record.findtext('atom[@name="HisBeginDateNotes"]')
+            his_end = record.findtext('atom[@name="HisEndDateNotes"]')
+            ident = record.findtext('atom[@name="irn"]')
+            if ident is not None and record.attrib == {}:
+                lines = []
+                if biog is not None:
+                    lines.append(biog.splitlines())
+                if his_begin is not None:
+                    lines.extend(his_begin.splitlines())
+                if his_end is not None:
+                    lines.extend(his_end.splitlines())
+                record.clear()
+                yield f'{ident} - {name}', lines
 
 
 def csv_iterator(csvfile):
@@ -31,16 +49,30 @@ def csv_iterator(csvfile):
     descriptive text from title and scope and content"""
     with open(csvfile, encoding='utf-8-sig') as f:
         reader = csv.DictReader(f)
-        for record in reader:
-            lines = []
-            title = record.get("EADUnitTitle")
-            scope = record.get("EADScopeAndContent")
-            ident = record.get("EADUnitID")
-            if title is not None:
-                lines.append(title)
-            if scope is not None:
-                lines.extend(scope.splitlines())
-            yield ident, lines
+        if 'EADUnitID' in reader.fieldnames:
+            for record in reader:
+                lines = []
+                title = record.get("EADUnitTitle")
+                scope = record.get("EADScopeAndContent")
+                ident = record.get("EADUnitID")
+                if title is not None:
+                    lines.append(title)
+                if scope is not None:
+                    lines.extend(scope.splitlines())
+                yield ident, lines
+        elif 'NamFullName' in reader.fieldnames:
+            for record in reader:
+                lines = []
+                name = record.get("NamFullName")
+                biog = record.get("BioCommencementNotes")
+                his_begin = record.get("HisBeginDateNotes")
+                ident = record.get("irn")
+                lines = []
+                if biog is not None:
+                    lines.extend(biog.splitlines())
+                if his_begin is not None:
+                    lines.extend(his_begin.splitlines())
+                yield f'{ident} - {name}', lines
 
 
 def reconcile_entities(futures):
@@ -48,7 +80,7 @@ def reconcile_entities(futures):
     for f in futures:
         line_ents = f.result()
         for ent, data in line_ents.items():
-            if ent in ents.keys():
+            if ents.get(ent) is not None:
                 ents[ent]['occurrences'].extend(data['occurrences'])
             else:
                 ents[ent] = data
@@ -70,7 +102,7 @@ def stanza_return_ents(ident, proc_text, labels=LABELS):
             else:
                 cend = entity.end_char + 10
             context = proc_text.text[cstart:cend]
-            if entity.text not in ents.keys():
+            if ents.get(entity.text) is not None:
                 ents[entity.text] = {'label': entity.type, 'occurrences': [
                         {
                             'text': entity.text, 'record': ident,
@@ -123,7 +155,7 @@ def spacy_return_ents(ident, proc_text, labels=LABELS):
             else:
                 cend = entity.end + 3
             context = proc_text[cstart:cend]
-            if entity.text not in ents.keys():
+            if ents.get(entity.text) is not None:
                 ents[entity.text] = {'label': entity.label_, 'occurrences': [
                         {'text': entity.text, 'record': ident, 'label': entity.label_,
                             'context': context.text}]}
@@ -157,24 +189,28 @@ def spacy_extract_entities(datafile, labels=LABELS):
     return(ents)
 
 
-def cluster_entities(entities):
+def match_entity(entity, data):
+    if entity in data.keys():
+        ent_data = data.pop(entity)
+        ent_data['alternate'] = []
+        r = process.extractOne(
+        entity, data.keys(), score_cutoff=90,
+        scorer=fuzz.token_sort_ratio)
+        if r is not None:
+            print(f'reconciled {entity} with {r[0]}')
+            fuzz_data = data.pop(r[0])
+            ent_data['occurrences'].extend(fuzz_data['occurrences'])
+            ent_data['alternate'].append(r[0])
+            data[entity] = ent_data
+
+
+def cluster_entities(data):
     sorted_entities = sorted(
-        entities.items(),
+        data.items(),
         key=lambda row: len(row[1]['occurrences']), reverse=True)
     for ent, _ in sorted_entities:
-        if ent in entities.keys():
-            data = entities.pop(ent)
-            data['alternate'] = []
-            r = process.extractOne(
-                ent, entities.keys(), score_cutoff=90,
-                scorer=fuzz.token_sort_ratio)
-            if r is not None:
-                print(f'reconciled {ent} with {r[0]}')
-                fuzz_data = entities.pop(r[0])
-                data['occurrences'].extend(fuzz_data['occurrences'])
-                data['alternate'].append(r[0])
-            entities[ent] = data
-    return entities
+        match_entity(ent, data)
+    return data
 
 
 def write_csv(csvfile, data):
@@ -222,7 +258,7 @@ if __name__ == '__main__':
         help='dump JSON output to file')
     argparser.add_argument(
         '--cluster', action='store_true',
-        help='dump JSON output to file')
+        help='cluster similar entities using fuzzy matching')
     argparser.add_argument(
         '--csv', type=str,
         help='convert to csv')

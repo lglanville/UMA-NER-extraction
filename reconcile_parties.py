@@ -31,12 +31,15 @@ def reconcile_parties(csvfile):
                     row['match score'] = r[1]
                     print(f'Matched {row["text"]} with {r[0]}')
             elif row['label'] in ('LOC', 'GPE'):
-                r = geolocator.geocode(row['text'])
-                if r is not None:
-                    row['address'] = r.address
-                    row['latitude'] = r.latitude
-                    row['longitude'] = r.longitude
-                    print(f'Matched {row["text"]} with {r.address}')
+                try:
+                    r = geolocator.geocode(row['text'])
+                    if r is not None:
+                        row['address'] = r.address
+                        row['latitude'] = r.latitude
+                        row['longitude'] = r.longitude
+                        print(f'Matched {row["text"]} with {r.address}')
+                except Exception as e:
+                    print(e)
             rows.append(row)
     fieldnames.extend([
         'EMU name', 'EMU IRN', 'match score',
