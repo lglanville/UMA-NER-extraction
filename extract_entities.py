@@ -190,12 +190,12 @@ def spacy_extract_entities(datafile, labels=LABELS):
 
 
 def match_entity(entity, data):
-    if entity in data.keys():
+    if data.get(entity) is not None:
         ent_data = data.pop(entity)
         ent_data['alternate'] = []
         r = process.extractOne(
-        entity, data.keys(), score_cutoff=90,
-        scorer=fuzz.token_sort_ratio)
+            entity, data.keys(), score_cutoff=90,
+            scorer=fuzz.token_sort_ratio)
         if r is not None:
             print(f'reconciled {entity} with {r[0]}')
             fuzz_data = data.pop(r[0])
@@ -244,7 +244,7 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser(description='extract some entities')
     argparser.add_argument(
         'xmlfile', metavar='i', type=str,
-        help='the base directory with your files')
+        help='EMu csv or xml file')
     argparser.add_argument(
         '--processor', '-p', type=str,
         default='stanza', choices=('spacy', 'stanza'),
@@ -261,7 +261,7 @@ if __name__ == '__main__':
         help='cluster similar entities using fuzzy matching')
     argparser.add_argument(
         '--csv', type=str,
-        help='convert to csv')
+        help='convert output to csv')
 
     args = argparser.parse_args()
     if args.processor == 'stanza':
