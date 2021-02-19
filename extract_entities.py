@@ -4,6 +4,7 @@ import argparse
 from pprint import pprint
 from concurrent.futures import ProcessPoolExecutor
 from threading import Lock
+import re
 from lxml import etree
 from fuzzywuzzy import process, fuzz
 
@@ -76,44 +77,35 @@ def csv_iterator(csvfile):
 
 
 def reconcile_entities(futures):
-    ents = {}
+    ent_data = {}
     for f in futures:
         line_ents = f.result()
-        for ent, data in line_ents.items():
-            if ents.get(ent) is not None:
-                ents[ent]['occurrences'].extend(data['occurrences'])
+        for entity, data in line_ents.items():
+            if ent_data.get(entity) is not None:
+                ent_data[entity]['occurrences'].extend(data['occurrences'])
             else:
-                ents[ent] = data
-    return(ents)
+                ent_data[entity] = data
+    return(ent_data)
 
 
 def stanza_return_ents(ident, proc_text, labels=LABELS):
     "Return a dictionary of entities from a line of text processed with Stanza"
-    ents = {}
+    ent_data = {}
     for entity in proc_text.entities:
         if entity.type in labels:
-            print(ident, entity.type, entity.text)
-            if entity.start_char < 10:
-                cstart = 0
-            else:
-                cstart = entity.start_char - 10
-            if entity.end_char > len(proc_text.text) + 10:
-                cend = len(proc_text.text)
-            else:
-                cend = entity.end_char + 10
-            context = proc_text.text[cstart:cend]
-            if ents.get(entity.text) is not None:
-                ents[entity.text] = {'label': entity.type, 'occurrences': [
+            context = entity.sent.text
+            if ent_data.get(entity.text) is not None:
+                ent_data[entity.text] = {'label': entity.type, 'occurrences': [
                         {
                             'text': entity.text, 'record': ident,
                             'label': entity.type, 'context': context
                             }
                         ], 'label': entity.type}
             else:
-                ents[entity.text]['occurrences'].append({
+                ent_data[entity.text]['occurrences'].append({
                     'text': entity.text, 'record': ident,
                     'label': entity.type, 'context': context})
-    return(ents)
+    return(ent_data)
 
 
 def stanza_extract_entities(datafile, labels=LABELS):
@@ -136,13 +128,13 @@ def stanza_extract_entities(datafile, labels=LABELS):
             for line in lines:
                 proc_line = nlp(line)
                 futures.append(ex.submit(stanza_return_ents, ident, proc_line, labels=labels))
-    ents = reconcile_entities(futures)
-    return(ents)
+    ent_data = reconcile_entities(futures)
+    return(ent_data)
 
 
 def spacy_return_ents(ident, proc_text, labels=LABELS):
     "Return a dictionary of entities from a line of text processed with Spacy"
-    ents = {}
+    ent_data = {}
     for entity in proc_text.ents:
         if entity.label_ in labels:
             print(ident, entity.label_, entity.text)
@@ -155,15 +147,15 @@ def spacy_return_ents(ident, proc_text, labels=LABELS):
             else:
                 cend = entity.end + 3
             context = proc_text[cstart:cend]
-            if ents.get(entity.text) is not None:
-                ents[entity.text] = {'label': entity.label_, 'occurrences': [
+            if ent_data.get(entity.text) is not None:
+                ent_data[entity.text] = {'label': entity.label_, 'occurrences': [
                         {'text': entity.text, 'record': ident, 'label': entity.label_,
                             'context': context.text}]}
             else:
-                ents[entity.text]['occurrences'].append(
+                ent_data[entity.text]['occurrences'].append(
                     {'text': entity.text, 'record': ident, 'label': entity.label_,
                         'context': context.text})
-    return(ents)
+    return(ent_data)
 
 
 def spacy_extract_entities(datafile, labels=LABELS):
@@ -174,7 +166,6 @@ def spacy_extract_entities(datafile, labels=LABELS):
     # known issue with Spacy
     import en_core_web_sm
     nlp = en_core_web_sm.load()
-    ents = {}
     futures = []
     if datafile.endswith('.xml'):
         records = xml_iterator(datafile)
@@ -185,8 +176,8 @@ def spacy_extract_entities(datafile, labels=LABELS):
             for line in lines:
                 proc_line = nlp(line)
                 futures.append(ex.submit(spacy_return_ents, ident, proc_line, labels=labels))
-    ents = reconcile_entities(futures)
-    return(ents)
+    ent_data = reconcile_entities(futures)
+    return(ent_data)
 
 
 def match_entity(entity, data):
@@ -214,8 +205,8 @@ def cluster_entities(data):
 
 
 def write_csv(csvfile, data):
-    """writes a csv file of entities, sorted by the frequency from highest to
-    lowest"""
+    """writes a csv file of entities, sorted by frequency of occurrences
+    from highest to lowest"""
     rows = []
     for text, data in data.items():
         records = []
@@ -234,16 +225,19 @@ def write_csv(csvfile, data):
         rows.append(row)
         rows = sorted(rows, key=lambda row: row['occurrences'], reverse=True)
         with open(csvfile, 'w', encoding='utf-8-sig', newline='') as f:
-            fieldnames = ['label', 'text', 'alternate', 'records', 'context', 'occurrences']
+            fieldnames = [
+                'label', 'text', 'alternate', 'records',
+                'context', 'occurrences']
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows)
 
 
 if __name__ == '__main__':
-    argparser = argparse.ArgumentParser(description='extract some entities')
+    argparser = argparse.ArgumentParser(
+        description='Extract named entities from some EMu metadata.')
     argparser.add_argument(
-        'xmlfile', metavar='i', type=str,
+        'metadata', metavar='i', type=str,
         help='EMu csv or xml file')
     argparser.add_argument(
         '--processor', '-p', type=str,
@@ -265,9 +259,9 @@ if __name__ == '__main__':
 
     args = argparser.parse_args()
     if args.processor == 'stanza':
-        ents = stanza_extract_entities(args.xmlfile, args.ents)
+        ents = stanza_extract_entities(args.metadata, args.ents)
     elif args.processor == 'spacy':
-        ents = spacy_extract_entities(args.xmlfile, args.ents)
+        ents = spacy_extract_entities(args.metadata, args.ents)
     if args.cluster:
         ents = cluster_entities(ents)
     if args.dump is not None:
