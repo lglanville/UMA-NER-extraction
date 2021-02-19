@@ -93,6 +93,7 @@ def stanza_return_ents(ident, proc_text, labels=LABELS):
     ent_data = {}
     for entity in proc_text.entities:
         if entity.type in labels:
+            print(ident, entity.type, entity.text)
             context = entity.sent.text
             if ent_data.get(entity.text) is not None:
                 ent_data[entity.text] = {'label': entity.type, 'occurrences': [
